@@ -4,11 +4,11 @@ import random
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QProgressBar, QFrame,
+    QListWidgetItem, QPushButton, QFrame,
     QGraphicsDropShadowEffect, QSizePolicy, QDialog,
 )
 from PyQt6.QtCore import (
-    pyqtSignal, Qt, QTimer, QPointF, QPoint,
+    pyqtSignal, Qt, QTimer, QPointF, QPoint, QRectF,
 )
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QLinearGradient, QRadialGradient,
@@ -37,6 +37,75 @@ CARD_BORDER = "rgba(255, 255, 255, 0.14)"
 # Path to face image
 _HERE = os.path.dirname(os.path.abspath(__file__))
 FACE_IMAGE_PATH = os.path.join(_HERE, "..", "..", "1.png")
+
+
+class _MaterialSpinner(QWidget):
+    """Material Design indeterminate circular spinner with glow effect."""
+
+    def __init__(self, size=48, thickness=4, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._size = size
+        self._thickness = thickness
+        self._angle = 0.0
+        self._span = 80.0
+        self._span_dir = 1
+        self._color_phase = 0.0
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(16)  # ~60 FPS
+
+    def _tick(self):
+        self._angle = (self._angle + 5.0) % 360.0
+        self._span += self._span_dir * 3.0
+        if self._span > 270:
+            self._span_dir = -1
+        elif self._span < 40:
+            self._span_dir = 1
+        self._color_phase = (self._color_phase + 0.02) % 1.0
+        self.update()
+
+    def start(self):
+        self.setVisible(True)
+        if not self._timer.isActive():
+            self._timer.start(16)
+
+    def stop(self):
+        self._timer.stop()
+        self.setVisible(False)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        m = self._thickness / 2 + 4
+        rect = QRectF(m, m, self._size - 2 * m, self._size - 2 * m)
+
+        # Glow effect
+        glow_pen = QPen(QColor(46, 144, 255, 40), self._thickness + 6,
+                        Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(glow_pen)
+        painter.drawArc(rect, int(-self._angle * 16), int(-self._span * 16))
+
+        # Track
+        track_pen = QPen(QColor(255, 255, 255, 18), self._thickness,
+                         Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(track_pen)
+        painter.drawEllipse(rect)
+
+        # Gradient arc — color shifts between blue and teal
+        r = int(46 + 0 * self._color_phase)
+        g = int(144 + 73 * self._color_phase)
+        b = int(255 - 86 * self._color_phase)
+        arc_color = QColor(r, g, b)
+
+        arc_pen = QPen(arc_color, self._thickness,
+                       Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(arc_pen)
+        painter.drawArc(rect, int(-self._angle * 16), int(-self._span * 16))
+
+        painter.end()
 
 
 class _Particle:
@@ -85,12 +154,13 @@ class _ExamModal(QDialog):
     """Modal dialog for selecting exams to download."""
     download_requested = pyqtSignal(list)  # list of session dicts
 
-    def __init__(self, sessions: list, parent=None):
+    def __init__(self, sessions: list, db: DatabaseManager, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
         self._sessions = sessions
+        self._db = db
         self._checkboxes = []
         self._setup_ui()
         if parent:
@@ -160,36 +230,62 @@ class _ExamModal(QDialog):
 
         # Session items
         for s in self._sessions:
+            session_row = self._db.get_session(s.get("id", 0))
+            is_loaded = bool(session_row and session_row["is_loaded"]) if session_row else False
+
             item_frame = QFrame()
             item_frame.setObjectName("examItem")
             item_frame.setCursor(Qt.CursorShape.PointingHandCursor)
-            item_frame.setStyleSheet(f"""
-                QFrame#examItem {{
-                    background: rgba(255,255,255,0.06);
-                    border: 1px solid rgba(255,255,255,0.10);
-                    border-radius: 14px;
-                    padding: 14px 16px;
-                }}
-                QFrame#examItem:hover {{
-                    background: rgba(46,144,255,0.14);
-                    border-color: rgba(99,197,255,0.35);
-                }}
-            """)
+            if is_loaded:
+                item_frame.setStyleSheet(f"""
+                    QFrame#examItem {{
+                        background: rgba(37,137,97,0.10);
+                        border: 1px solid rgba(56,217,169,0.25);
+                        border-radius: 14px;
+                        padding: 14px 16px;
+                    }}
+                    QFrame#examItem:hover {{
+                        background: rgba(37,137,97,0.18);
+                        border-color: rgba(56,217,169,0.40);
+                    }}
+                """)
+            else:
+                item_frame.setStyleSheet(f"""
+                    QFrame#examItem {{
+                        background: rgba(255,255,255,0.06);
+                        border: 1px solid rgba(255,255,255,0.10);
+                        border-radius: 14px;
+                        padding: 14px 16px;
+                    }}
+                    QFrame#examItem:hover {{
+                        background: rgba(46,144,255,0.14);
+                        border-color: rgba(99,197,255,0.35);
+                    }}
+                """)
 
             row = QHBoxLayout(item_frame)
             row.setContentsMargins(14, 10, 14, 10)
             row.setSpacing(14)
 
             # Icon
-            icon_wrap = QLabel("\U0001f4cb")
+            icon_text = "\u2705" if is_loaded else "\U0001f4cb"
+            icon_wrap = QLabel(icon_text)
             icon_wrap.setFixedSize(38, 38)
             icon_wrap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_wrap.setStyleSheet("""
-                background: rgba(46,144,255,0.18);
-                border: 1px solid rgba(99,197,255,0.2);
-                border-radius: 10px;
-                font-size: 17px;
-            """)
+            if is_loaded:
+                icon_wrap.setStyleSheet("""
+                    background: rgba(37,137,97,0.22);
+                    border: 1px solid rgba(56,217,169,0.25);
+                    border-radius: 10px;
+                    font-size: 17px;
+                """)
+            else:
+                icon_wrap.setStyleSheet("""
+                    background: rgba(46,144,255,0.18);
+                    border: 1px solid rgba(99,197,255,0.2);
+                    border-radius: 10px;
+                    font-size: 17px;
+                """)
             row.addWidget(icon_wrap)
 
             # Info
@@ -200,32 +296,47 @@ class _ExamModal(QDialog):
             name_label.setStyleSheet("color: white; background: transparent; border: none;")
             info_layout.addWidget(name_label)
 
-            meta_label = QLabel(
-                f"{s.get('total_students', 0)} ta student  |  {s.get('start_date', '')}"
-            )
+            meta_text = f"{s.get('total_students', 0)} ta student  |  {s.get('start_date', '')}"
+            meta_label = QLabel(meta_text)
             meta_label.setFont(QFont("Segoe UI", 12))
             meta_label.setStyleSheet("color: rgba(255,255,255,0.5); background: transparent; border: none;")
             info_layout.addWidget(meta_label)
             row.addLayout(info_layout, stretch=1)
 
-            # Checkbox indicator
-            check_label = QLabel()
-            check_label.setFixedSize(20, 20)
-            check_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            check_label.setStyleSheet("""
-                background: rgba(99,197,255,0.05);
-                border: 1.5px solid rgba(99,197,255,0.4);
-                border-radius: 6px;
-            """)
-            row.addWidget(check_label)
+            # Status badge or checkbox
+            if is_loaded:
+                badge = QLabel("Yuklangan")
+                badge.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+                badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                badge.setFixedHeight(26)
+                badge.setStyleSheet("""
+                    background: rgba(37,137,97,0.25);
+                    color: #38d9a9;
+                    border: 1px solid rgba(56,217,169,0.3);
+                    border-radius: 8px;
+                    padding: 2px 10px;
+                """)
+                row.addWidget(badge)
+            else:
+                check_label = QLabel()
+                check_label.setFixedSize(20, 20)
+                check_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                check_label.setStyleSheet("""
+                    background: rgba(99,197,255,0.05);
+                    border: 1.5px solid rgba(99,197,255,0.4);
+                    border-radius: 6px;
+                """)
+                row.addWidget(check_label)
 
             self._checkboxes.append({
                 "frame": item_frame,
-                "check": check_label,
+                "check": badge if is_loaded else check_label,
                 "selected": False,
                 "session": s,
+                "is_loaded": is_loaded,
             })
-            item_frame.mousePressEvent = lambda e, idx=len(self._checkboxes)-1: self._toggle_item(idx)
+            if not is_loaded:
+                item_frame.mousePressEvent = lambda e, idx=len(self._checkboxes)-1: self._toggle_item(idx)
 
             layout.addWidget(item_frame)
             layout.addSpacing(10)
@@ -286,6 +397,8 @@ class _ExamModal(QDialog):
 
     def _toggle_item(self, idx):
         item = self._checkboxes[idx]
+        if item.get("is_loaded"):
+            return
         item["selected"] = not item["selected"]
         if item["selected"]:
             item["check"].setStyleSheet("""
@@ -320,7 +433,7 @@ class _ExamModal(QDialog):
                 }}
             """)
 
-        any_selected = any(c["selected"] for c in self._checkboxes)
+        any_selected = any(c["selected"] and not c.get("is_loaded") for c in self._checkboxes)
         self._download_btn.setEnabled(any_selected)
 
     def _on_download(self):
@@ -710,24 +823,13 @@ class SyncPage(QWidget):
 
         left_layout.addSpacing(20)
 
-        # ── Progress bar (hidden by default) ──
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setFixedHeight(8)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: none;
-                border-radius: 4px;
-                background-color: rgba(255,255,255,0.1);
-            }}
-            QProgressBar::chunk {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {ACCENT_BLUE}, stop:1 #38d9a9);
-                border-radius: 4px;
-            }}
-        """)
-        left_layout.addWidget(self.progress_bar)
+        # ── Spinner (hidden by default) ──
+        self._spinner = _MaterialSpinner(size=48, thickness=4, parent=self)
+        self._spinner.setVisible(False)
+        spinner_container = QHBoxLayout()
+        spinner_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spinner_container.addWidget(self._spinner)
+        left_layout.addLayout(spinner_container)
 
         # ── Status label ──
         self.status_label = QLabel("")
@@ -839,7 +941,8 @@ class SyncPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._load_sessions()
+        if not self._sessions:
+            self._load_sessions()
 
     def _on_download_clicked(self):
         """Open exam selection modal."""
@@ -852,7 +955,7 @@ class SyncPage(QWidget):
                 )
                 return
 
-        modal = _ExamModal(self._sessions, parent=self)
+        modal = _ExamModal(self._sessions, self._db, parent=self)
         modal.download_requested.connect(self._start_download_sessions)
         modal.exec()
 
@@ -931,8 +1034,7 @@ class SyncPage(QWidget):
         if not session_id:
             return
 
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
+        self._spinner.start()
         self._download_action_btn.setEnabled(False)
         self.status_label.setText("Yuklab olinmoqda...")
         self.status_label.setStyleSheet(
@@ -951,8 +1053,7 @@ class SyncPage(QWidget):
             self._start_download_sessions([self._sessions[0]])
 
     def _on_progress(self, current, total):
-        self.progress_bar.setMaximum(total)
-        self.progress_bar.setValue(current)
+        pass  # Spinner handles visual feedback
 
     def _on_download_ok(self, loaded: int, skipped: int):
         if skipped > 0:
@@ -967,7 +1068,7 @@ class SyncPage(QWidget):
             self.status_label.setStyleSheet(
                 "color: #38d9a9; background: transparent; border: none; font-weight: 600;"
             )
-        self.progress_bar.setVisible(False)
+        self._spinner.stop()
         self._download_action_btn.setEnabled(True)
 
     def _on_download_error(self, err):
@@ -975,5 +1076,5 @@ class SyncPage(QWidget):
         self.status_label.setStyleSheet(
             "color: #ff7c7c; background: transparent; border: none; font-weight: 600;"
         )
-        self.progress_bar.setVisible(False)
+        self._spinner.stop()
         self._download_action_btn.setEnabled(True)

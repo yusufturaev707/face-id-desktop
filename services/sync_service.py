@@ -165,6 +165,9 @@ class DataDownloader(QThread):
                     err_msg += f"\n... va yana {len(skipped_names) - 20} ta"
                 self.error.emit(err_msg)
 
+            if students:
+                self._db.mark_session_loaded(self._session_id)
+
             self.finished_ok.emit(len(students), len(skipped_names))
         except Exception as e:
             self.error.emit(str(e))

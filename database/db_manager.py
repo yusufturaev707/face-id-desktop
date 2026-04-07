@@ -237,8 +237,7 @@ class DatabaseManager(metaclass=SingletonMeta):
     def clear_all_data(self):
         self._conn.execute("DELETE FROM entry_log")
         self._conn.execute("DELETE FROM student")
-        self._conn.execute("DELETE FROM test_session_sm")
-        self._conn.execute("DELETE FROM test_session")
+        self._conn.execute("UPDATE test_session SET is_loaded=0")
         self._conn.commit()
 
     def close(self):
