@@ -16,17 +16,10 @@ from PyQt6.QtGui import (
 from database.db_manager import DatabaseManager
 from ui.styles import FONT_FAMILY
 
-# ── Dark theme tokens (matching session_page.html) ──
-BG_1 = "#07141d"
-BG_2 = "#0d2b3d"
-BG_3 = "#123b4f"
-PRIMARY = "#258961"
+# ── Dark theme tokens ──
 PRIMARY_LIGHT = "#3ba57c"
-ACCENT_BLUE = "#2e90ff"
 ACCENT_BLUE_LIGHT = "#63C5FF"
-TEXT_LIGHT = "#f8fbfc"
 TEXT_MUTED = "rgba(255,255,255,0.72)"
-CARD_BG = "rgba(255,255,255,0.08)"
 CARD_BORDER = "rgba(255,255,255,0.14)"
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +47,8 @@ class _Particle:
 
 
 class _SmenaCard(QFrame):
-    """Clickable smena card matching the HTML session-card style."""
+    """Clickable smena card — aniq tanlash CTA pillini ko'rsatadi.
+    `is_active` — haqiqiy DB holati (shu smena hozir faolmi)."""
     clicked = pyqtSignal(int)
 
     def __init__(self, sm_id: int, title: str, meta: str, badge_text: str,
@@ -64,23 +58,33 @@ class _SmenaCard(QFrame):
         self._hover = False
         self._active = is_active
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(80)
+        self.setFixedHeight(92)
         self.setStyleSheet("background: transparent; border: none;")
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(14, 12, 14, 12)
-        row.setSpacing(13)
+        row.setContentsMargins(16, 14, 16, 14)
+        row.setSpacing(14)
 
-        # Icon
+        # Icon — active bo'lsa yashil, aks holda ko'k
         icon = QLabel("\u23f0")
-        icon.setFixedSize(44, 44)
+        icon.setFixedSize(46, 46)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet("""
-            background: rgba(52,161,255,0.18);
-            border: 1px solid rgba(99,197,255,0.18);
-            border-radius: 13px;
-            font-size: 18px;
-        """)
+        if is_active:
+            icon.setStyleSheet("""
+                background: rgba(37,137,97,0.22);
+                border: 1px solid rgba(56,217,169,0.32);
+                border-radius: 13px;
+                color: #38d9a9;
+                font-size: 18px;
+            """)
+        else:
+            icon.setStyleSheet("""
+                background: rgba(52,161,255,0.18);
+                border: 1px solid rgba(99,197,255,0.22);
+                border-radius: 13px;
+                color: #63C5FF;
+                font-size: 18px;
+            """)
         row.addWidget(icon)
 
         # Text
@@ -90,43 +94,96 @@ class _SmenaCard(QFrame):
 
         title_label = QLabel(title)
         title_label.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
-        title_label.setStyleSheet("color: white; background: transparent; border: none;")
+        title_label.setStyleSheet("color: white; background: transparent; border: none; letter-spacing: 0.2px;")
         text_layout.addWidget(title_label)
 
         meta_label = QLabel(meta)
         meta_label.setFont(QFont("Segoe UI", 11))
-        meta_label.setStyleSheet("color: rgba(255,255,255,0.50); background: transparent; border: none;")
+        meta_label.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent; border: none;")
         text_layout.addWidget(meta_label)
 
         row.addLayout(text_layout, stretch=1)
 
-        # Badge
+        # Badge — "Faol" yashil, "Mavjud" ko'k
         badge = QLabel(badge_text)
-        badge.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        badge.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setFixedHeight(24)
-        badge.setStyleSheet("""
-            background: rgba(52,161,255,0.14);
-            border: 1px solid rgba(99,197,255,0.18);
-            color: #63C5FF;
-            border-radius: 12px;
-            padding: 2px 10px;
-        """)
+        badge.setFixedHeight(26)
+        if is_active:
+            badge.setStyleSheet("""
+                background: rgba(37,137,97,0.22);
+                border: 1px solid rgba(56,217,169,0.36);
+                color: #38d9a9;
+                border-radius: 13px;
+                padding: 2px 12px;
+                letter-spacing: 0.3px;
+            """)
+        else:
+            badge.setStyleSheet("""
+                background: rgba(255,255,255,0.06);
+                border: 1px solid rgba(255,255,255,0.12);
+                color: rgba(255,255,255,0.70);
+                border-radius: 13px;
+                padding: 2px 12px;
+                letter-spacing: 0.3px;
+            """)
         row.addWidget(badge)
 
-        # Chevron
-        chevron = QLabel("\u203A")
-        chevron.setFont(QFont("Segoe UI", 20))
-        chevron.setStyleSheet("color: rgba(255,255,255,0.30); background: transparent; border: none;")
-        row.addWidget(chevron)
+        # ── Aniq CTA pilli: "Tanlash →" ──
+        self._cta = QFrame()
+        self._cta.setObjectName("smenaCta")
+        self._cta.setFixedHeight(36)
+        self._cta.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_cta_style(hover=False)
+        cta_layout = QHBoxLayout(self._cta)
+        cta_layout.setContentsMargins(14, 0, 14, 0)
+        cta_layout.setSpacing(8)
+
+        self._cta_label = QLabel("Tanlash")
+        self._cta_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self._cta_label.setStyleSheet("color: #ffffff; background: transparent; border: none; letter-spacing: 0.4px;")
+        cta_layout.addWidget(self._cta_label)
+
+        self._cta_arrow = QLabel("\u2192")
+        self._cta_arrow.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        self._cta_arrow.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        cta_layout.addWidget(self._cta_arrow)
+
+        row.addWidget(self._cta)
+
+    def _update_cta_style(self, hover: bool):
+        """Active vs hover vs default — uchta holatdagi CTA styling."""
+        if self._active:
+            if hover:
+                bg = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #38c48c, stop:1 #1fa06f)"
+                brd = "rgba(120,248,201,0.70)"
+            else:
+                bg = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2eb07c, stop:1 #1a8f62)"
+                brd = "rgba(56,217,169,0.55)"
+        else:
+            if hover:
+                bg = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3ca7f5, stop:1 #1e6fd6)"
+                brd = "rgba(125,211,255,0.70)"
+            else:
+                bg = "rgba(52,161,255,0.20)"
+                brd = "rgba(99,197,255,0.40)"
+        self._cta.setStyleSheet(f"""
+            QFrame#smenaCta {{
+                background: {bg};
+                border: 1px solid {brd};
+                border-radius: 12px;
+            }}
+        """)
 
     def enterEvent(self, event):
         self._hover = True
+        self._update_cta_style(hover=True)
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self._hover = False
+        self._update_cta_style(hover=False)
         self.update()
         super().leaveEvent(event)
 
@@ -142,18 +199,22 @@ class _SmenaCard(QFrame):
         path = QPainterPath()
         path.addRoundedRect(0, 0, w, h, 18, 18)
 
-        # Background
+        # Active (haqiqiy faol smena) → yashil tinted; hover → ko'k glow; default → neytral
         if self._active:
-            painter.fillPath(path, QColor(37, 137, 97, 20))
-            border_color = QColor(37, 137, 97, 140) if self._hover else QColor(37, 137, 97, 90)
+            painter.fillPath(path, QColor(37, 137, 97, 28 if self._hover else 18))
+            border_color = QColor(56, 217, 169, 170) if self._hover else QColor(56, 217, 169, 95)
+            border_width = 1.5 if self._hover else 1
         elif self._hover:
-            painter.fillPath(path, QColor(52, 161, 255, 20))
-            border_color = QColor(99, 197, 255, 165)
+            painter.fillPath(path, QColor(52, 161, 255, 26))
+            border_color = QColor(125, 211, 255, 180)
+            border_width = 1.5
         else:
-            painter.fillPath(path, QColor(255, 255, 255, 14))
-            border_color = QColor(255, 255, 255, 36)
+            painter.fillPath(path, QColor(255, 255, 255, 12))
+            border_color = QColor(255, 255, 255, 32)
+            border_width = 1
 
-        painter.setPen(QPen(border_color, 1))
+        pen = QPen(border_color, border_width)
+        painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(1, 1, w - 2, h - 2, 18, 18)
         painter.end()
@@ -202,9 +263,9 @@ class _AccordionItem(QFrame):
         meta_layout.setSpacing(3)
         meta_layout.setContentsMargins(0, 0, 0, 0)
 
-        tag = QLabel("IMTIHON YO'NALISHI")
+        tag = QLabel("Imtihon yo'nalishi")
         tag.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        tag.setStyleSheet(f"color: {ACCENT_BLUE_LIGHT}; background: transparent; border: none; letter-spacing: 1.3px;")
+        tag.setStyleSheet(f"color: {ACCENT_BLUE_LIGHT}; background: transparent; border: none;")
         meta_layout.addWidget(tag)
 
         name = QLabel(session.get("test", "Test"))
@@ -220,32 +281,35 @@ class _AccordionItem(QFrame):
 
         h_layout.addLayout(meta_layout, stretch=1)
 
-        # Right side: badge + toggle
+        # Right side: smena count badge + aniq "Ochish/Yopish" CTA
         right = QHBoxLayout()
         right.setSpacing(10)
 
-        badge = QLabel(f"{len(smenas)} smena")
-        badge.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+        badge = QLabel(f"\U0001F4CB  {len(smenas)} smena")
+        badge.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setFixedHeight(28)
+        badge.setFixedHeight(30)
         badge.setStyleSheet("""
-            background: rgba(52,161,255,0.14);
-            border: 1px solid rgba(99,197,255,0.18);
-            color: #63C5FF;
-            border-radius: 14px;
+            background: rgba(52,161,255,0.16);
+            border: 1px solid rgba(99,197,255,0.26);
+            color: #7DD3FF;
+            border-radius: 15px;
             padding: 2px 14px;
+            letter-spacing: 0.3px;
         """)
         right.addWidget(badge)
 
-        self._toggle_label = QLabel("\u25BC")
-        self._toggle_label.setFixedSize(38, 38)
+        self._toggle_label = QLabel("Ochish  \u25BC")
+        self._toggle_label.setFixedHeight(30)
         self._toggle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._toggle_label.setFont(QFont("Segoe UI", 12))
+        self._toggle_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self._toggle_label.setStyleSheet("""
-            background: rgba(52,161,255,0.14);
-            border: 1px solid rgba(99,197,255,0.18);
-            color: #63C5FF;
-            border-radius: 11px;
+            background: rgba(52,161,255,0.20);
+            border: 1px solid rgba(99,197,255,0.35);
+            color: #ffffff;
+            border-radius: 15px;
+            padding: 2px 14px;
+            letter-spacing: 0.3px;
         """)
         right.addWidget(self._toggle_label)
 
@@ -261,24 +325,33 @@ class _AccordionItem(QFrame):
         body_layout.setContentsMargins(22, 8, 22, 18)
         body_layout.setSpacing(12)
 
-        # Sub-header
+        # Sub-header — aniq CTA: "Smenani tanlang" + yo'riqnoma matni
         sub_header_layout = QHBoxLayout()
-        sub_header_layout.setSpacing(10)
-        sh_icon = QLabel("\u2630")
-        sh_icon.setFont(QFont("Segoe UI", 14))
-        sh_icon.setStyleSheet(f"color: {PRIMARY_LIGHT}; background: transparent; border: none;")
+        sub_header_layout.setSpacing(12)
+        sh_icon = QLabel("\U0001F446")
+        sh_icon.setFixedSize(32, 32)
+        sh_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sh_icon.setStyleSheet("""
+            background: rgba(56,217,169,0.16);
+            border: 1px solid rgba(56,217,169,0.28);
+            border-radius: 10px;
+            color: #38d9a9;
+            font-size: 14px;
+        """)
         sub_header_layout.addWidget(sh_icon)
 
         sh_text_layout = QVBoxLayout()
-        sh_text_layout.setSpacing(1)
-        sh_title = QLabel("Mavjud smenalar")
-        sh_title.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
-        sh_title.setStyleSheet("color: white; background: transparent; border: none;")
+        sh_text_layout.setSpacing(2)
+        sh_title = QLabel("Smenani tanlang")
+        sh_title.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        sh_title.setStyleSheet("color: white; background: transparent; border: none; letter-spacing: 0.2px;")
         sh_text_layout.addWidget(sh_title)
-        sh_sub = QLabel("Davom etish uchun quyidagi sessiyalardan birini tanlang")
-        sh_sub.setFont(QFont("Segoe UI", 11))
-        sh_sub.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent; border: none;")
-        sh_text_layout.addWidget(sh_sub)
+
+        sh_hint = QLabel("Kerakli smenani bosing \u2014 FaceID tizimi shu smena uchun ishga tushiriladi")
+        sh_hint.setFont(QFont("Segoe UI", 10))
+        sh_hint.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent; border: none;")
+        sh_text_layout.addWidget(sh_hint)
+
         sub_header_layout.addLayout(sh_text_layout, stretch=1)
         body_layout.addLayout(sub_header_layout)
 
@@ -289,16 +362,17 @@ class _AccordionItem(QFrame):
         for i, sm in enumerate(smenas):
             students = db.get_students_by_smena(sm["id"])
             with_emb = sum(1 for st in students if st["embedding"])
-            title = f"{sm['test_day']}  \u00b7  {sm['sm']}-SMENA"
-            meta = f"Studentlar: {len(students)}  (embedding: {with_emb})"
-            badge_text = "Faol" if sm["is_active"] else "Mavjud"
+            title = f"{sm['test_day']}  \u00b7  {sm['sm']}-smena"
+            meta = f"\U0001F465 {len(students)} student  \u00b7  \U0001F9E0 {with_emb} embedding"
+            is_active = bool(sm["is_active"])
+            badge_text = "Faol" if is_active else "Mavjud"
 
             card = _SmenaCard(
                 sm_id=sm["id"],
                 title=title,
                 meta=meta,
                 badge_text=badge_text,
-                is_active=(i == 0),
+                is_active=is_active,
             )
             card.clicked.connect(self.smena_clicked.emit)
             grid.addWidget(card, i // 2, i % 2)
@@ -309,20 +383,26 @@ class _AccordionItem(QFrame):
     def toggle(self):
         self._expanded = not self._expanded
         self._body.setVisible(self._expanded)
-        self._toggle_label.setText("\u25B2" if self._expanded else "\u25BC")
         if self._expanded:
+            self._toggle_label.setText("Yopish  \u25B2")
             self._toggle_label.setStyleSheet("""
-                background: rgba(52,161,255,0.22);
-                border: 1px solid rgba(99,197,255,0.35);
-                color: #63C5FF;
-                border-radius: 11px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #2eb07c, stop:1 #1a8f62);
+                border: 1px solid rgba(56,217,169,0.55);
+                color: #ffffff;
+                border-radius: 15px;
+                padding: 2px 14px;
+                letter-spacing: 0.3px;
             """)
         else:
+            self._toggle_label.setText("Ochish  \u25BC")
             self._toggle_label.setStyleSheet("""
-                background: rgba(52,161,255,0.14);
-                border: 1px solid rgba(99,197,255,0.18);
-                color: #63C5FF;
-                border-radius: 11px;
+                background: rgba(52,161,255,0.20);
+                border: 1px solid rgba(99,197,255,0.35);
+                color: #ffffff;
+                border-radius: 15px;
+                padding: 2px 14px;
+                letter-spacing: 0.3px;
             """)
         self.update()
 
@@ -391,49 +471,22 @@ class SessionPage(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # ── Background gradient ──
+        # ── Animated gradient background (matching login/sync/mode pages) ──
         offset = math.sin(self._anim_angle) * 0.15
         bg = QLinearGradient(0, 0, w * (0.6 + offset), h)
-        bg.setColorAt(0.0, QColor(BG_1))
-        bg.setColorAt(0.45, QColor(BG_2))
-        bg.setColorAt(1.0, QColor(BG_3))
+        bg.setColorAt(0.0, QColor("#0a1628"))
+        bg.setColorAt(0.3, QColor("#0D47A1"))
+        bg.setColorAt(0.6, QColor("#1565C0"))
+        bg.setColorAt(1.0, QColor("#0a1628"))
         painter.fillRect(self.rect(), bg)
 
-        # ── Ambient radial glows ──
-        glows = [
-            (0.12, 0.22, PRIMARY, 46, 0.26),
-            (0.82, 0.28, ACCENT_BLUE, 41, 0.24),
-            (0.68, 0.78, "#E4EFF2", 20, 0.20),
-        ]
-        for gx, gy, color, alpha, radius in glows:
-            pulse = 0.7 + 0.3 * math.sin(self._glow_phase + gx * 10)
-            g = QRadialGradient(w * gx, h * gy, max(w, h) * radius)
-            c = QColor(color)
-            c.setAlpha(int(alpha * pulse))
-            g.setColorAt(0.0, c)
-            c.setAlpha(0)
-            g.setColorAt(1.0, c)
-            painter.fillRect(self.rect(), g)
-
-        # ── Grid lines (subtle) ──
-        grid_pen = QPen(QColor(255, 255, 255, 6), 1)
-        painter.setPen(grid_pen)
-        grid_size = 44
-        cx, cy = w * 0.6, h * 0.4
-        for x in range(0, w + grid_size, grid_size):
-            dist = abs(x - cx) / w
-            alpha = max(0, int(6 * (1 - dist * 1.5)))
-            if alpha > 0:
-                grid_pen.setColor(QColor(255, 255, 255, alpha))
-                painter.setPen(grid_pen)
-                painter.drawLine(x, 0, x, h)
-        for y in range(0, h + grid_size, grid_size):
-            dist = abs(y - cy) / h
-            alpha = max(0, int(6 * (1 - dist * 1.5)))
-            if alpha > 0:
-                grid_pen.setColor(QColor(255, 255, 255, alpha))
-                painter.setPen(grid_pen)
-                painter.drawLine(0, y, w, y)
+        # ── Radial glow accent (pulsing) ──
+        pulse = 0.7 + 0.3 * math.sin(self._anim_angle * 2)
+        glow = QRadialGradient(w * 0.5, h * 0.4, max(w, h) * 0.5)
+        glow.setColorAt(0.0, QColor(30, 136, 229, int(40 * pulse)))
+        glow.setColorAt(0.5, QColor(13, 71, 161, int(20 * pulse)))
+        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.fillRect(self.rect(), glow)
 
         # ── Particles ──
         for p in self._particles:
@@ -526,11 +579,6 @@ class SessionPage(QWidget):
         brand_title.setStyleSheet("color: #E4EFF2; background: transparent; border: none; letter-spacing: 0.3px;")
         brand_text.addWidget(brand_title)
 
-        brand_sub = QLabel("\U0001f4f7  FaceID identifikatsiya platformasi")
-        brand_sub.setFont(QFont("Segoe UI", 11))
-        brand_sub.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; border: none;")
-        brand_text.addWidget(brand_sub)
-
         header_layout.addLayout(brand_text, stretch=1)
 
         # Live badge
@@ -595,7 +643,7 @@ class SessionPage(QWidget):
         h_title.setStyleSheet("color: white; background: transparent; border: none;")
         h_text_layout.addWidget(h_title)
 
-        h_sub = QLabel("Imtihon yo'nalishini oching va mos smenani belgilang")
+        h_sub = QLabel("Imtihon yo'nalishini oching \u2192 kerakli smenani tanlang")
         h_sub.setFont(QFont("Segoe UI", 12))
         h_sub.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; border: none;")
         h_text_layout.addWidget(h_sub)
@@ -663,7 +711,7 @@ class SessionPage(QWidget):
         footer_layout.setSpacing(14)
 
         # Back button
-        back_btn = QPushButton("\u2190   ORQAGA")
+        back_btn = QPushButton("\u2190   Orqaga")
         back_btn.setFixedHeight(48)
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         back_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
@@ -688,7 +736,7 @@ class SessionPage(QWidget):
         footer_layout.addStretch()
 
         # Tech note
-        tech_note = QLabel("\u2022  FaceID real-vaqt identifikatsiya tizimi")
+        tech_note = QLabel("\u2022  BBA")
         tech_note.setFont(QFont("Segoe UI", 11))
         tech_note.setStyleSheet("color: rgba(255,255,255,0.40); background: transparent; border: none;")
         footer_layout.addWidget(tech_note)
@@ -733,10 +781,12 @@ class SessionPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        sessions = self._db.get_active_sessions()
+        all_sessions = self._db.get_active_sessions()
+        sessions = [s for s in all_sessions if s["is_loaded"]]
+        sessions.sort(key=lambda s: s["start_date"] or "")
 
         if not sessions:
-            self._info_label.setText("Hech qanday test topilmadi.\nAvval sinxronlash sahifasidan yuklang.")
+            self._info_label.setText("Yuklab olingan test topilmadi.\nAvval sinxronlash sahifasidan yuklang.")
             return
 
         self._info_label.setText("")

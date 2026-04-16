@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS test_session_sm (
 
 CREATE TABLE IF NOT EXISTS student (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id BIGINT NOT NULL UNIQUE,
     session_sm_id INTEGER NOT NULL,
     zone_id INTEGER NOT NULL,
     last_name TEXT NOT NULL,
@@ -49,16 +50,35 @@ CREATE TABLE IF NOT EXISTS student (
     is_cheating INTEGER DEFAULT 0,
     is_blacklist INTEGER DEFAULT 0,
     is_entered INTEGER DEFAULT 0,
-    ps_img TEXT,
-    embedding TEXT,
-    FOREIGN KEY (session_sm_id) REFERENCES test_session_sm(id) ON DELETE CASCADE
+    ps_img BLOB,
+    embedding BLOB,
+    reject_reason_id INTEGER,
+    rejected_at TEXT,
+    FOREIGN KEY (session_sm_id) REFERENCES test_session_sm(id) ON DELETE CASCADE,
+    FOREIGN KEY (reject_reason_id) REFERENCES reason(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS reason_type (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    key INTEGER NOT NULL UNIQUE,
+    is_active INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS reason (
+    id INTEGER PRIMARY KEY,
+    reason_type_id INTEGER,
+    name TEXT NOT NULL,
+    key INTEGER NOT NULL UNIQUE,
+    is_active INTEGER DEFAULT 1,
+    FOREIGN KEY (reason_type_id) REFERENCES reason_type(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS entry_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER NOT NULL,
-    first_captured TEXT,
-    last_captured TEXT,
+    student_id BIGINT NOT NULL,
+    first_captured BLOB,
+    last_captured BLOB,
     first_enter_time TEXT DEFAULT (datetime('now','localtime')),
     last_enter_time TEXT,
     staff_id INTEGER NOT NULL,
@@ -70,7 +90,11 @@ CREATE TABLE IF NOT EXISTS entry_log (
     retry_count INTEGER DEFAULT 0,
     ip_address TEXT,
     mac_address TEXT,
-    FOREIGN KEY (student_id) REFERENCES student(id) ON DELETE CASCADE,
+    is_rejected INTEGER DEFAULT 0,
+    reject_reason_id INTEGER,
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_student_student_id ON student(student_id);
+CREATE INDEX IF NOT EXISTS idx_entry_log_student_id ON entry_log(student_id);
 """

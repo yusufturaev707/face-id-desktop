@@ -36,76 +36,273 @@ CARD_BORDER = "rgba(255, 255, 255, 0.14)"
 
 # Path to face image
 _HERE = os.path.dirname(os.path.abspath(__file__))
-FACE_IMAGE_PATH = os.path.join(_HERE, "..", "..", "1.png")
+FACE_IMAGE_PATH = os.path.join(_HERE, "..", "..", "images", "face.png")
 
 
-class _MaterialSpinner(QWidget):
-    """Material Design indeterminate circular spinner with glow effect."""
+class _LoadingOverlay(QWidget):
+    """Fullscreen modal overlay with spinner (loading) and result (success/warning/error) states."""
 
-    def __init__(self, size=48, thickness=4, parent=None):
+    MODE_LOADING = "loading"
+    MODE_SUCCESS = "success"
+    MODE_WARNING = "warning"
+    MODE_ERROR = "error"
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(size, size)
-        self._size = size
-        self._thickness = thickness
+        self.setVisible(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+
+        self._mode = self.MODE_LOADING
         self._angle = 0.0
         self._span = 80.0
         self._span_dir = 1
         self._color_phase = 0.0
+        self._pulse_phase = 0.0
+        self._status_text = "Yuklab olinmoqda..."
+        self._sub_text = "Iltimos, kutib turing..."
+        self._result_icon = ""
+        self._fade_progress = 0.0  # 0→1 for result icon scale-in
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(16)  # ~60 FPS
+
+        self._auto_close_timer = QTimer(self)
+        self._auto_close_timer.setSingleShot(True)
+        self._auto_close_timer.timeout.connect(self.stop)
 
     def _tick(self):
-        self._angle = (self._angle + 5.0) % 360.0
-        self._span += self._span_dir * 3.0
-        if self._span > 270:
-            self._span_dir = -1
-        elif self._span < 40:
-            self._span_dir = 1
-        self._color_phase = (self._color_phase + 0.02) % 1.0
+        self._pulse_phase += 0.06
+        if self._mode == self.MODE_LOADING:
+            self._angle = (self._angle + 4.5) % 360.0
+            self._span += self._span_dir * 2.5
+            if self._span > 260:
+                self._span_dir = -1
+            elif self._span < 45:
+                self._span_dir = 1
+            self._color_phase = (self._color_phase + 0.015) % 1.0
+        else:
+            # Animate result icon scale-in
+            if self._fade_progress < 1.0:
+                self._fade_progress = min(1.0, self._fade_progress + 0.06)
         self.update()
 
-    def start(self):
+    def start(self, text: str = "Yuklab olinmoqda..."):
+        self._mode = self.MODE_LOADING
+        self._status_text = text
+        self._sub_text = "Iltimos, kutib turing..."
+        self._fade_progress = 0.0
+        self._auto_close_timer.stop()
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+            self.raise_()
         self.setVisible(True)
         if not self._timer.isActive():
             self._timer.start(16)
 
+    def show_result(self, mode: str, title: str, subtitle: str = "",
+                    auto_close_ms: int = 2500):
+        """Switch overlay to result state (success/warning/error)."""
+        self._mode = mode
+        self._status_text = title
+        self._sub_text = subtitle
+        self._fade_progress = 0.0
+        if mode == self.MODE_SUCCESS:
+            self._result_icon = "\u2713"
+        elif mode == self.MODE_WARNING:
+            self._result_icon = "!"
+        else:
+            self._result_icon = "\u2717"
+        self.update()
+        if auto_close_ms > 0:
+            self._auto_close_timer.start(auto_close_ms)
+
     def stop(self):
         self._timer.stop()
+        self._auto_close_timer.stop()
         self.setVisible(False)
+
+    def resizeEvent(self, event):
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        super().resizeEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
 
-        m = self._thickness / 2 + 4
-        rect = QRectF(m, m, self._size - 2 * m, self._size - 2 * m)
+        # ── Dark overlay ──
+        painter.fillRect(self.rect(), QColor(5, 15, 25, 180))
 
-        # Glow effect
-        glow_pen = QPen(QColor(46, 144, 255, 40), self._thickness + 6,
-                        Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        painter.setPen(glow_pen)
-        painter.drawArc(rect, int(-self._angle * 16), int(-self._span * 16))
+        # ── Card ──
+        card_w, card_h = 340, 280
+        cx = (w - card_w) // 2
+        cy = (h - card_h) // 2
 
-        # Track
-        track_pen = QPen(QColor(255, 255, 255, 18), self._thickness,
-                         Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        painter.setPen(track_pen)
-        painter.drawEllipse(rect)
+        card_path = QPainterPath()
+        card_path.addRoundedRect(float(cx), float(cy),
+                                  float(card_w), float(card_h), 28, 28)
 
-        # Gradient arc — color shifts between blue and teal
-        r = int(46 + 0 * self._color_phase)
-        g = int(144 + 73 * self._color_phase)
-        b = int(255 - 86 * self._color_phase)
-        arc_color = QColor(r, g, b)
+        card_bg = QLinearGradient(cx, cy, cx + card_w, cy + card_h)
+        card_bg.setColorAt(0.0, QColor(255, 255, 255, 26))
+        card_bg.setColorAt(1.0, QColor(255, 255, 255, 13))
+        painter.fillPath(card_path, card_bg)
 
-        arc_pen = QPen(arc_color, self._thickness,
-                       Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        painter.setPen(arc_pen)
-        painter.drawArc(rect, int(-self._angle * 16), int(-self._span * 16))
+        # Card border
+        painter.setPen(QPen(QColor(255, 255, 255, 36), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(card_path)
+
+        # Top shimmer
+        shimmer = QPainterPath()
+        shimmer.moveTo(cx + 28, cy)
+        shimmer.lineTo(cx + card_w - 28, cy)
+        sg = QLinearGradient(cx, 0, cx + card_w, 0)
+
+        if self._mode == self.MODE_LOADING:
+            sg.setColorAt(0.0, QColor(255, 255, 255, 0))
+            sg.setColorAt(0.3, QColor(255, 255, 255, 56))
+            sg.setColorAt(0.5, QColor(46, 144, 255, 80))
+            sg.setColorAt(0.7, QColor(255, 255, 255, 56))
+            sg.setColorAt(1.0, QColor(255, 255, 255, 0))
+        elif self._mode == self.MODE_SUCCESS:
+            sg.setColorAt(0.0, QColor(0, 0, 0, 0))
+            sg.setColorAt(0.3, QColor(56, 217, 169, 60))
+            sg.setColorAt(0.5, QColor(37, 137, 97, 100))
+            sg.setColorAt(0.7, QColor(56, 217, 169, 60))
+            sg.setColorAt(1.0, QColor(0, 0, 0, 0))
+        elif self._mode == self.MODE_WARNING:
+            sg.setColorAt(0.0, QColor(0, 0, 0, 0))
+            sg.setColorAt(0.3, QColor(255, 200, 100, 60))
+            sg.setColorAt(0.5, QColor(249, 168, 37, 100))
+            sg.setColorAt(0.7, QColor(255, 200, 100, 60))
+            sg.setColorAt(1.0, QColor(0, 0, 0, 0))
+        else:
+            sg.setColorAt(0.0, QColor(0, 0, 0, 0))
+            sg.setColorAt(0.3, QColor(255, 100, 100, 60))
+            sg.setColorAt(0.5, QColor(214, 69, 69, 100))
+            sg.setColorAt(0.7, QColor(255, 100, 100, 60))
+            sg.setColorAt(1.0, QColor(0, 0, 0, 0))
+
+        painter.setPen(QPen(QBrush(sg), 1))
+        painter.drawPath(shimmer)
+
+        center_x = w // 2
+        icon_cy = cy + 85
+
+        if self._mode == self.MODE_LOADING:
+            self._paint_spinner(painter, center_x, icon_cy)
+        else:
+            self._paint_result_icon(painter, center_x, icon_cy)
+
+        # ── Status text ──
+        text_y = icon_cy + 50
+        painter.setPen(QColor(255, 255, 255, 220))
+        painter.setFont(QFont("Segoe UI", 15, QFont.Weight.DemiBold))
+        painter.drawText(cx, text_y, card_w, 30,
+                          Qt.AlignmentFlag.AlignCenter, self._status_text)
+
+        # Sub-text
+        if self._sub_text:
+            sub_color = QColor(255, 255, 255, 90)
+            if self._mode == self.MODE_SUCCESS:
+                sub_color = QColor(56, 217, 169, 160)
+            elif self._mode == self.MODE_WARNING:
+                sub_color = QColor(255, 200, 100, 160)
+            elif self._mode == self.MODE_ERROR:
+                sub_color = QColor(255, 124, 124, 160)
+            painter.setPen(sub_color)
+            painter.setFont(QFont("Segoe UI", 12))
+            painter.drawText(cx, text_y + 34, card_w, 24,
+                              Qt.AlignmentFlag.AlignCenter, self._sub_text)
+
+        # Animated dots (loading only)
+        if self._mode == self.MODE_LOADING:
+            dots_y = text_y + 66
+            dot_spacing = 14
+            base_x = center_x - dot_spacing
+            for i in range(3):
+                phase = self._pulse_phase + i * 0.8
+                dot_alpha = int(60 + 120 * max(0, math.sin(phase)))
+                dot_r = 3.0 + 1.5 * max(0, math.sin(phase))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(46, 144, 255, dot_alpha))
+                painter.drawEllipse(QPointF(base_x + i * dot_spacing, dots_y),
+                                     dot_r, dot_r)
 
         painter.end()
+
+    def _paint_spinner(self, painter: QPainter, cx: int, cy: int):
+        size, thickness = 64, 4.5
+        m = thickness / 2 + 5
+        rect = QRectF(cx - size / 2 + m, cy - size / 2 + m,
+                       size - 2 * m, size - 2 * m)
+
+        pulse = 0.6 + 0.4 * math.sin(self._pulse_phase)
+        painter.setPen(QPen(QColor(46, 144, 255, int(35 * pulse)),
+                             thickness + 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawArc(rect, int(-self._angle * 16), int(-self._span * 16))
+
+        painter.setPen(QPen(QColor(255, 255, 255, 15), thickness,
+                             Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawEllipse(rect)
+
+        r = int(46 + 10 * self._color_phase)
+        g = int(144 + 73 * self._color_phase)
+        b = int(255 - 86 * self._color_phase)
+        painter.setPen(QPen(QColor(r, g, b), thickness,
+                             Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawArc(rect, int(-self._angle * 16), int(-self._span * 16))
+
+    def _paint_result_icon(self, painter: QPainter, cx: int, cy: int):
+        # Determine colors by mode
+        if self._mode == self.MODE_SUCCESS:
+            ring_color = QColor(37, 137, 97)
+            glow_color = QColor(56, 217, 169, 50)
+            icon_color = QColor(56, 217, 169)
+        elif self._mode == self.MODE_WARNING:
+            ring_color = QColor(249, 168, 37)
+            glow_color = QColor(255, 200, 100, 45)
+            icon_color = QColor(255, 200, 100)
+        else:
+            ring_color = QColor(214, 69, 69)
+            glow_color = QColor(255, 100, 100, 45)
+            icon_color = QColor(255, 124, 124)
+
+        radius = 30
+        # Ease-out scale
+        t = self._fade_progress
+        scale = 1.0 + 0.3 * (1.0 - t) ** 2  # starts big, settles to 1.0
+        scaled_r = int(radius * scale)
+
+        # Glow
+        pulse = 0.7 + 0.3 * math.sin(self._pulse_phase)
+        glow = QRadialGradient(cx, cy, scaled_r + 20)
+        gc = QColor(glow_color)
+        gc.setAlpha(int(gc.alpha() * pulse))
+        glow.setColorAt(0.0, gc)
+        gc.setAlpha(0)
+        glow.setColorAt(1.0, gc)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(QPointF(cx, cy), scaled_r + 20, scaled_r + 20)
+
+        # Ring
+        ring_c = QColor(ring_color)
+        ring_c.setAlpha(int(200 * min(1.0, t * 2)))
+        painter.setPen(QPen(ring_c, 3.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(cx, cy), scaled_r, scaled_r)
+
+        # Icon text
+        icon_c = QColor(icon_color)
+        icon_c.setAlpha(int(255 * min(1.0, t * 1.5)))
+        painter.setPen(icon_c)
+        font = QFont("Segoe UI", 24, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(cx - scaled_r, cy - scaled_r,
+                          scaled_r * 2, scaled_r * 2,
+                          Qt.AlignmentFlag.AlignCenter, self._result_icon)
 
 
 class _Particle:
@@ -167,9 +364,25 @@ class _ExamModal(QDialog):
             self.resize(parent.size())
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(5, 15, 25, 166))
-        painter.end()
+        # Glassmorphism scrim: to'q fon + radial vignette chuqurlik beradi;
+        # card ustida yumshoq shisha effekti hosil qiladi.
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        p.fillRect(self.rect(), QColor(8, 14, 22, 220))
+        center = QPointF(w / 2, h / 2)
+        vignette = QRadialGradient(center, max(w, h) * 0.6)
+        vignette.setColorAt(0.0, QColor(15, 25, 40, 0))
+        vignette.setColorAt(0.7, QColor(5, 10, 18, 60))
+        vignette.setColorAt(1.0, QColor(0, 0, 0, 120))
+        p.fillRect(self.rect(), vignette)
+        p.end()
+
+    def mousePressEvent(self, event):
+        # Card tashqarisiga bosilganda modal yopiladi (glass modal pattern).
+        if not self.childAt(event.pos()):
+            self.reject()
+        super().mousePressEvent(event)
 
     def _setup_ui(self):
         outer = QVBoxLayout(self)
@@ -178,11 +391,12 @@ class _ExamModal(QDialog):
         card = QFrame()
         card.setObjectName("examModalCard")
         card.setFixedWidth(480)
+        # Dark glass gradient — scrim bilan kontrast, ichki kontent yaxshi o'qiladi.
         card.setStyleSheet(f"""
             QFrame#examModalCard {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255,255,255,26), stop:1 rgba(255,255,255,13));
-                border: 1px solid {CARD_BORDER};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(20,35,60,0.94), stop:1 rgba(12,22,42,0.94));
+                border: 1px solid rgba(99,197,255,0.22);
                 border-radius: 24px;
             }}
         """)
@@ -190,7 +404,7 @@ class _ExamModal(QDialog):
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(60)
         shadow.setOffset(0, 24)
-        shadow.setColor(QColor(0, 0, 0, 115))
+        shadow.setColor(QColor(0, 0, 0, 140))
         card.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(card)
@@ -207,24 +421,6 @@ class _ExamModal(QDialog):
         header.addWidget(title)
         header.addStretch()
 
-        close_btn = QPushButton("\u2715")
-        close_btn.setFixedSize(34, 34)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(255,255,255,0.08);
-                color: rgba(255,255,255,0.65);
-                border: none;
-                border-radius: 10px;
-                font-size: 18px;
-            }
-            QPushButton:hover {
-                background: rgba(255,255,255,0.15);
-                color: white;
-            }
-        """)
-        close_btn.clicked.connect(self.reject)
-        header.addWidget(close_btn)
         layout.addLayout(header)
         layout.addSpacing(22)
 
@@ -347,46 +543,59 @@ class _ExamModal(QDialog):
         footer = QHBoxLayout()
         footer.setSpacing(10)
 
-        self._download_btn = QPushButton("Yuklab olish")
-        self._download_btn.setFixedHeight(46)
+        self._download_btn = QPushButton("\u2B73  Yuklab olish")
+        self._download_btn.setFixedHeight(50)
         self._download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._download_btn.setFont(QFont("Segoe UI", 14, QFont.Weight.DemiBold))
         self._download_btn.setEnabled(False)
         self._download_btn.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #2aa774, stop:1 #1a8f62);
-                color: white;
-                border: none;
-                border-radius: 12px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3bbf88, stop:1 #1a8f62);
+                color: #ffffff;
+                border: 1px solid rgba(56,217,169,0.45);
+                border-radius: 14px;
                 font-family: {FONT_FAMILY};
+                padding: 0 18px;
+                letter-spacing: 0.3px;
             }}
             QPushButton:hover {{
-                background: #258961;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #45d19a, stop:1 #1fa06f);
+                border-color: rgba(86,235,186,0.65);
+            }}
+            QPushButton:pressed {{
+                background: #1a8f62;
             }}
             QPushButton:disabled {{
-                background: rgba(255,255,255,0.07);
-                color: rgba(255,255,255,0.3);
+                background: rgba(255,255,255,0.05);
+                color: rgba(255,255,255,0.28);
+                border-color: rgba(255,255,255,0.06);
             }}
         """)
         self._download_btn.clicked.connect(self._on_download)
-        footer.addWidget(self._download_btn, stretch=1)
+        footer.addWidget(self._download_btn, stretch=2)
 
-        cancel_btn = QPushButton("Bekor qilish")
-        cancel_btn.setFixedHeight(46)
+        cancel_btn = QPushButton("\u2715  Bekor qilish")
+        cancel_btn.setFixedHeight(50)
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setFont(QFont("Segoe UI", 14))
+        cancel_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Medium))
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background: rgba(255,255,255,0.07);
-                color: rgba(255,255,255,0.7);
-                border: 1px solid rgba(255,255,255,0.12);
-                border-radius: 12px;
+                background: transparent;
+                color: rgba(255,255,255,0.65);
+                border: 1px solid rgba(255,255,255,0.14);
+                border-radius: 14px;
                 font-family: {FONT_FAMILY};
+                padding: 0 18px;
             }}
             QPushButton:hover {{
-                background: rgba(255,255,255,0.13);
-                color: white;
+                background: rgba(255,255,255,0.06);
+                color: rgba(255,255,255,0.92);
+                border-color: rgba(255,255,255,0.22);
+            }}
+            QPushButton:pressed {{
+                background: rgba(255,255,255,0.10);
             }}
         """)
         cancel_btn.clicked.connect(self.reject)
@@ -399,25 +608,10 @@ class _ExamModal(QDialog):
         item = self._checkboxes[idx]
         if item.get("is_loaded"):
             return
-        item["selected"] = not item["selected"]
+
+        # If clicking already selected item — deselect it
         if item["selected"]:
-            item["check"].setStyleSheet("""
-                background: rgba(46,144,255,0.85);
-                border: 1.5px solid #63C5FF;
-                border-radius: 6px;
-                color: white;
-                font-size: 12px;
-            """)
-            item["check"].setText("\u2713")
-            item["frame"].setStyleSheet(f"""
-                QFrame#examItem {{
-                    background: rgba(46,144,255,0.12);
-                    border: 1px solid rgba(99,197,255,0.3);
-                    border-radius: 14px;
-                    padding: 14px 16px;
-                }}
-            """)
-        else:
+            item["selected"] = False
             item["check"].setStyleSheet("""
                 background: rgba(99,197,255,0.05);
                 border: 1.5px solid rgba(99,197,255,0.4);
@@ -432,9 +626,47 @@ class _ExamModal(QDialog):
                     padding: 14px 16px;
                 }}
             """)
+            self._download_btn.setEnabled(False)
+            return
 
-        any_selected = any(c["selected"] and not c.get("is_loaded") for c in self._checkboxes)
-        self._download_btn.setEnabled(any_selected)
+        # Deselect previously selected item
+        for i, c in enumerate(self._checkboxes):
+            if c["selected"] and not c.get("is_loaded"):
+                c["selected"] = False
+                c["check"].setStyleSheet("""
+                    background: rgba(99,197,255,0.05);
+                    border: 1.5px solid rgba(99,197,255,0.4);
+                    border-radius: 6px;
+                """)
+                c["check"].setText("")
+                c["frame"].setStyleSheet(f"""
+                    QFrame#examItem {{
+                        background: rgba(255,255,255,0.06);
+                        border: 1px solid rgba(255,255,255,0.10);
+                        border-radius: 14px;
+                        padding: 14px 16px;
+                    }}
+                """)
+
+        # Select the clicked item
+        item["selected"] = True
+        item["check"].setStyleSheet("""
+            background: rgba(46,144,255,0.85);
+            border: 1.5px solid #63C5FF;
+            border-radius: 6px;
+            color: white;
+            font-size: 12px;
+        """)
+        item["check"].setText("\u2713")
+        item["frame"].setStyleSheet(f"""
+            QFrame#examItem {{
+                background: rgba(46,144,255,0.12);
+                border: 1px solid rgba(99,197,255,0.3);
+                border-radius: 14px;
+                padding: 14px 16px;
+            }}
+        """)
+        self._download_btn.setEnabled(True)
 
     def _on_download(self):
         selected = [c["session"] for c in self._checkboxes if c["selected"]]
@@ -445,6 +677,7 @@ class _ExamModal(QDialog):
 class SyncPage(QWidget):
     sync_complete = pyqtSignal()
     logout_requested = pyqtSignal()
+    data_cleared = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -537,11 +770,12 @@ class SyncPage(QWidget):
                     painter.setPen(pen)
                     painter.drawLine(QPointF(p1.x, p1.y), QPointF(p2.x, p2.y))
 
-        # ── Right panel area (use actual widget geometry) ──
+        # ── Right panel area (map to SyncPage coordinates) ──
         if hasattr(self, '_right_panel') and self._right_panel.isVisible():
-            rg = self._right_panel.geometry()
-            if rg.width() > 100:
-                self._paint_right_panel(painter, rg.x(), rg.y(), rg.width(), rg.height())
+            pos = self._right_panel.mapTo(self, QPoint(0, 0))
+            rw, rh = self._right_panel.width(), self._right_panel.height()
+            if rw > 100:
+                self._paint_right_panel(painter, pos.x(), pos.y(), rw, rh)
 
         painter.end()
 
@@ -701,190 +935,382 @@ class SyncPage(QWidget):
         painter.restore()
 
     def _setup_ui(self):
-        root = QHBoxLayout(self)
-        root.setContentsMargins(28, 28, 28, 28)
-        root.setSpacing(24)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(22, 22, 22, 22)
+        outer.setSpacing(0)
 
-        # ══════════════════════════════════════
-        # LEFT PANEL - glassmorphism action card
-        # ══════════════════════════════════════
-        left_panel = QFrame()
-        left_panel.setObjectName("leftPanel")
-        left_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        left_panel.setStyleSheet(f"""
-            QFrame#leftPanel {{
+        # ═══ MAIN GLASS CARD ═══
+        self._card = QFrame()
+        self._card.setObjectName("mainCard")
+        self._card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._card.setStyleSheet(f"""
+            QFrame#mainCard {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(255,255,255,26), stop:1 rgba(255,255,255,13));
+                    stop:0 rgba(255,255,255,24), stop:1 rgba(255,255,255,12));
                 border: 1px solid {CARD_BORDER};
                 border-radius: 28px;
             }}
         """)
 
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(40)
+        shadow.setBlurRadius(50)
         shadow.setOffset(0, 14)
-        shadow.setColor(QColor(0, 0, 0, 72))
-        left_panel.setGraphicsEffect(shadow)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        self._card.setGraphicsEffect(shadow)
 
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(30, 36, 30, 30)
-        left_layout.setSpacing(0)
+        card_layout = QVBoxLayout(self._card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
 
-        # ── Brand section ──
-        brand_layout = QHBoxLayout()
-        brand_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_layout.setSpacing(18)
+        # ── CARD HEADER ──
+        header = QFrame()
+        header.setObjectName("cardHeader")
+        header.setFixedHeight(90)
+        header.setStyleSheet("""
+            QFrame#cardHeader {
+                background: rgba(52,161,255,0.08);
+                border: none;
+                border-top-left-radius: 28px;
+                border-top-right-radius: 28px;
+                border-bottom: 1px solid rgba(255,255,255,0.07);
+            }
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(34, 0, 34, 0)
+        header_layout.setSpacing(18)
 
-        # Logo image
+        # Brand logo
         logo_path = os.path.join(_HERE, "..", "..", "images", "logo_bba.png")
         logo_label = QLabel()
-        logo_label.setFixedSize(120, 100)
+        logo_label.setFixedSize(62, 52)
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_label.setStyleSheet("background: transparent; border: none;")
         logo_pixmap = QPixmap(os.path.normpath(logo_path))
         if not logo_pixmap.isNull():
             logo_label.setPixmap(logo_pixmap.scaled(
-                120, 100,
-                Qt.AspectRatioMode.KeepAspectRatio,
+                62, 52, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))
-        brand_layout.addWidget(logo_label)
+        header_layout.addWidget(logo_label)
 
         # Brand text
-        brand_text_layout = QVBoxLayout()
-        brand_text_layout.setSpacing(6)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(4)
+        brand_title = QLabel("Bilim va malakalarni baholash agentligi")
+        brand_title.setFont(QFont("Segoe UI", 14, QFont.Weight.DemiBold))
+        brand_title.setStyleSheet("color: #E4EFF2; background: transparent; border: none; letter-spacing: 0.3px;")
+        brand_text.addWidget(brand_title)
+        header_layout.addLayout(brand_text, stretch=1)
 
-        brand_title = QLabel("BILIM VA MALAKALARNI\nBAHOLASH AGENTLIGI")
-        brand_title.setFont(QFont("Segoe UI", 48, QFont.Weight.Bold))
-        brand_title.setStyleSheet("color: #E4EFF2; background: transparent; border: none; letter-spacing: 0.6px;")
-        brand_text_layout.addWidget(brand_title)
+        # Live badge
+        live_badge = QFrame()
+        live_badge.setFixedHeight(36)
+        live_badge.setStyleSheet("""
+            QFrame {
+                background: rgba(52,161,255,0.14);
+                border: 1px solid rgba(99,197,255,0.18);
+                border-radius: 18px;
+                padding: 0 14px;
+            }
+        """)
+        lb_layout = QHBoxLayout(live_badge)
+        lb_layout.setContentsMargins(14, 0, 14, 0)
+        lb_layout.setSpacing(8)
 
-        brand_layout.addLayout(brand_text_layout)
-        left_layout.addLayout(brand_layout)
-        left_layout.addSpacing(70)
-        left_panel.setLayout(left_layout)
+        dot = QLabel()
+        dot.setFixedSize(8, 8)
+        dot.setStyleSheet("background: #38d9a9; border: none; border-radius: 4px;")
+        lb_layout.addWidget(dot)
 
-        # ── Action buttons ──
+        lb_text = QLabel("FaceID tizimi ishlayapti")
+        lb_text.setFont(QFont("Segoe UI", 12, QFont.Weight.Medium))
+        lb_text.setStyleSheet("color: #63C5FF; background: transparent; border: none; letter-spacing: 0.3px;")
+        lb_layout.addWidget(lb_text)
 
-        # 1. Download button (blue/secondary)
+        header_layout.addWidget(live_badge)
+        card_layout.addWidget(header)
+
+        # ── CARD BODY ──
+        body = QFrame()
+        body.setStyleSheet("background: transparent; border: none;")
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(24, 20, 24, 10)
+        body_layout.setSpacing(24)
+
+        # ── Left: Action panel (MD3 kompakt, zamonaviy) ──
+        left = QFrame()
+        left.setStyleSheet("background: transparent; border: none;")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(6, 14, 6, 10)
+        left_layout.setSpacing(0)
+
+        # ── Heading: ixcham 38px chip + mayda tipografiya ──
+        heading_layout = QHBoxLayout()
+        heading_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        heading_layout.setSpacing(12)
+
+        h_icon = QLabel("\U0001F504")
+        h_icon.setFixedSize(38, 38)
+        h_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_icon.setStyleSheet("""
+            background: rgba(52,161,255,0.16);
+            border: 1px solid rgba(99,197,255,0.24);
+            border-radius: 12px;
+            color: #63C5FF;
+            font-size: 16px;
+        """)
+        heading_layout.addWidget(h_icon)
+
+        h_text_layout = QVBoxLayout()
+        h_text_layout.setSpacing(1)
+        h_title = QLabel("Ma\u2018lumotlarni boshqarish")
+        h_title.setFont(QFont("Segoe UI", 14, QFont.Weight.DemiBold))
+        h_title.setStyleSheet("color: #F0F6FA; background: transparent; border: none; letter-spacing: 0.2px;")
+        h_text_layout.addWidget(h_title)
+
+        h_sub = QLabel("Bazani yuklash, sinxronlash va tozalash")
+        h_sub.setFont(QFont("Segoe UI", 10))
+        h_sub.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent; border: none;")
+        h_text_layout.addWidget(h_sub)
+
+        heading_layout.addLayout(h_text_layout)
+        heading_layout.addStretch()
+        left_layout.addLayout(heading_layout)
+        left_layout.addSpacing(20)
+
+        # ── Asosiy amallar bo'limi ──
+        section_primary = self._make_section_label("Asosiy amallar")
+        left_layout.addWidget(section_primary)
+        left_layout.addSpacing(10)
+
+        # Bazani yuklab olish — MA'LUMOT YUKLASH (tonal info action)
         self._download_action_btn = self._create_action_button(
-            icon_text="\u2B07",
-            label="BAZANI YUKLAB OLISH",
-            hint="Serverdan ma'lumotlarni yuklab olish",
-            icon_bg="rgba(52,161,255,0.18)",
-            icon_border="rgba(99,197,255,0.18)",
-            icon_color="#63C5FF",
-            border_color="rgba(52,161,255,0.22)",
-            hover_border="rgba(99,197,255,0.42)",
-            hover_bg="rgba(52,161,255,0.08)",
+            icon_text="\U0001F4E5",
+            label="Bazani yuklab olish",
+            hint="Serverdan sessiyalarni olish",
+            icon_bg="rgba(52,161,255,0.22)",
+            icon_border="rgba(99,197,255,0.32)",
+            icon_color="#7DD3FF",
+            border_color="rgba(52,161,255,0.28)",
+            hover_border="rgba(125,211,255,0.55)",
+            hover_bg="rgba(52,161,255,0.12)",
         )
         self._download_action_btn.clicked.connect(self._on_download_clicked)
         left_layout.addWidget(self._download_action_btn)
-        left_layout.addSpacing(16)
+        left_layout.addSpacing(22)
 
-        # 2. Face Recognition button (green/primary)
-        face_rec_btn = self._create_action_button(
-            icon_text="\U0001f9d1",
-            label="FACE RECOGNITION",
-            hint="Biometrik yuzni aniqlash tizimi",
-            icon_bg="rgba(37,137,97,0.2)",
-            icon_border="rgba(56,217,169,0.2)",
-            icon_color="#38d9a9",
-            border_color="rgba(37,137,97,0.28)",
-            hover_border="rgba(56,217,169,0.42)",
-            hover_bg="rgba(37,137,97,0.08)",
-        )
-        face_rec_btn.clicked.connect(self.sync_complete.emit)
-        left_layout.addWidget(face_rec_btn)
-        left_layout.addSpacing(32)
+        # ── Xavfli zona bo'limi — chiziqli ajratkich bilan ──
+        danger_sep = self._make_divider("Xavfli zona", accent="rgba(255,124,124,0.55)")
+        left_layout.addWidget(danger_sep)
+        left_layout.addSpacing(10)
 
-        # Note text
-        note = QLabel("\u2022  Testlar tugagach bazani tozalash mumkin")
-        note.setFont(QFont("Segoe UI", 12))
-        note.setStyleSheet("color: rgba(255,255,255,0.45); background: transparent; border: none;")
-        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        left_layout.addWidget(note)
-        left_layout.addSpacing(16)
-
-        # 3. Delete button (red/danger)
+        # Bazani tozalash — DESTRUCTIVE (danger action)
         delete_btn = self._create_action_button(
-            icon_text="\U0001f5d1",
-            label="BAZANI TOZALASH",
-            hint="Vaqtinchalik ma'lumotlarni o'chirish",
-            icon_bg="rgba(214,69,69,0.18)",
-            icon_border="rgba(255,100,100,0.18)",
-            icon_color="#ff7c7c",
-            border_color="rgba(214,69,69,0.24)",
-            hover_border="rgba(255,100,100,0.38)",
-            hover_bg="rgba(214,69,69,0.07)",
+            icon_text="\U0001F5D1\uFE0F",
+            label="Bazani tozalash",
+            hint="Mahalliy ma\u2018lumotlarni butunlay o\u2018chirish",
+            icon_bg="rgba(214,69,69,0.22)",
+            icon_border="rgba(255,124,124,0.32)",
+            icon_color="#FF9090",
+            border_color="rgba(214,69,69,0.30)",
+            hover_border="rgba(255,124,124,0.58)",
+            hover_bg="rgba(214,69,69,0.14)",
         )
         delete_btn.clicked.connect(self._on_delete_clicked)
         left_layout.addWidget(delete_btn)
+        left_layout.addSpacing(14)
 
-        left_layout.addSpacing(20)
-
-        # ── Spinner (hidden by default) ──
-        self._spinner = _MaterialSpinner(size=48, thickness=4, parent=self)
-        self._spinner.setVisible(False)
-        spinner_container = QHBoxLayout()
-        spinner_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        spinner_container.addWidget(self._spinner)
-        left_layout.addLayout(spinner_container)
-
-        # ── Status label ──
+        # ── Status chip — faqat matn bo'lsa ko'rinadi ──
         self.status_label = QLabel("")
-        self.status_label.setFont(QFont("Segoe UI", 13))
-        self.status_label.setStyleSheet("color: rgba(255,255,255,0.6); background: transparent; border: none;")
+        self.status_label.setFont(QFont("Segoe UI", 11))
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setWordWrap(True)
+        self.status_label.setVisible(False)
+        self.status_label.setStyleSheet("""
+            QLabel {
+                color: rgba(255,255,255,0.72);
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px;
+                padding: 8px 14px;
+            }
+        """)
         left_layout.addWidget(self.status_label)
 
+        # Stretch pushes Face Recognition hero button to the very bottom
         left_layout.addStretch()
 
-        # ── Logout button at bottom ──
-        logout_btn = QPushButton("Chiqish")
-        logout_btn.setFixedHeight(42)
-        logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        logout_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
-        logout_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: rgba(255,255,255,0.06);
-                color: rgba(255,255,255,0.6);
-                border: 1px solid rgba(255,255,255,0.12);
-                border-radius: 12px;
-                font-family: {FONT_FAMILY};
-            }}
-            QPushButton:hover {{
-                background: rgba(214,69,69,0.15);
-                color: #ff7c7c;
-                border-color: rgba(214,69,69,0.3);
-            }}
+        # ── Face Recognition — HERO primary CTA (asosiy oldinga o'tish amali) ──
+        hero_sep = QFrame()
+        hero_sep.setFixedHeight(1)
+        hero_sep.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(56,217,169,0.00),
+                stop:0.5 rgba(56,217,169,0.35),
+                stop:1 rgba(56,217,169,0.00));
+            border: none;
         """)
-        logout_btn.clicked.connect(self.logout_requested.emit)
-        left_layout.addWidget(logout_btn)
+        left_layout.addWidget(hero_sep)
+        left_layout.addSpacing(14)
 
-        root.addWidget(left_panel, stretch=1)
+        face_rec_btn = self._create_hero_button(
+            icon_text="\U0001F50D",
+            label="Face Recognition",
+            hint="Biometrik yuzni aniqlash tizimini ishga tushirish",
+        )
+        face_rec_btn.clicked.connect(self.sync_complete.emit)
+        left_layout.addWidget(face_rec_btn)
+        body_layout.addWidget(left, stretch=1)
 
-        # Right panel placeholder (painted in paintEvent)
+        # ── Right: Decorative panel (painted in paintEvent) ──
         self._right_panel = QFrame()
         self._right_panel.setObjectName("rightPanel")
         self._right_panel.setStyleSheet("QFrame#rightPanel { background: transparent; border: none; }")
         self._right_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        root.addWidget(self._right_panel, stretch=1)
+        body_layout.addWidget(self._right_panel, stretch=1)
+
+        card_layout.addWidget(body, stretch=1)
+
+        # ── CARD FOOTER ──
+        footer = QFrame()
+        footer.setObjectName("cardFooter")
+        footer.setFixedHeight(72)
+        footer.setStyleSheet("""
+            QFrame#cardFooter {
+                background: transparent;
+                border: none;
+                border-top: 1px solid rgba(255,255,255,0.07);
+            }
+        """)
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(34, 0, 34, 0)
+        footer_layout.setSpacing(14)
+
+        footer_layout.addStretch()
+
+        # Tech note
+        tech_note = QLabel("\u2022  BBA")
+        tech_note.setFont(QFont("Segoe UI", 11))
+        tech_note.setStyleSheet("color: rgba(255,255,255,0.40); background: transparent; border: none;")
+        footer_layout.addWidget(tech_note)
+
+        footer_layout.addStretch()
+
+        # Logout button
+        logout_btn = QPushButton("Chiqish")
+        logout_btn.setFixedHeight(48)
+        logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        logout_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
+        logout_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,0.055);
+                color: rgba(255,255,255,0.70);
+                border: 1px solid rgba(255,255,255,0.09);
+                border-radius: 14px;
+                padding: 0 22px;
+                font-family: {FONT_FAMILY};
+            }}
+            QPushButton:hover {{
+                background: rgba(214,69,69,0.18);
+                color: #ff7c7c;
+                border-color: rgba(214,69,69,0.35);
+            }}
+        """)
+        logout_btn.clicked.connect(self.logout_requested.emit)
+        footer_layout.addWidget(logout_btn)
+
+        card_layout.addWidget(footer)
+        outer.addWidget(self._card)
+
+        # Loading overlay (fullscreen modal spinner)
+        self._loading_overlay = _LoadingOverlay(parent=self)
+
+    def _make_section_label(self, text: str) -> QLabel:
+        """Kompakt bo'lim sarlavhasi — yumshoq kulrang tonda."""
+        lbl = QLabel(text)
+        lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        lbl.setStyleSheet("""
+            color: rgba(255,255,255,0.55);
+            background: transparent;
+            border: none;
+        """)
+        return lbl
+
+    def _make_divider(self, text: str, accent: str = "rgba(255,255,255,0.18)") -> QFrame:
+        """Chiziqli ajratkich: ikki tomonlama chiziq + markazda label.
+        `accent` — matn va chiziq rangi (xavfli bo'limlar uchun qizg'ish)."""
+        wrap = QFrame()
+        wrap.setStyleSheet("background: transparent; border: none;")
+        wrap.setFixedHeight(20)
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+
+        left_line = QFrame()
+        left_line.setFixedHeight(1)
+        left_line.setStyleSheet(f"background: {accent}; border: none;")
+        left_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        row.addWidget(left_line)
+
+        lbl = QLabel(text)
+        lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet(f"""
+            color: {accent};
+            background: transparent;
+            border: none;
+        """)
+        row.addWidget(lbl)
+
+        right_line = QFrame()
+        right_line.setFixedHeight(1)
+        right_line.setStyleSheet(f"background: {accent}; border: none;")
+        right_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        row.addWidget(right_line)
+
+        return wrap
+
+    def _set_status(self, text: str, variant: str = "info"):
+        """Status chip'ni yangilaydi. `variant`: info / success / warning / error.
+        Matn bo'sh bo'lsa chip yashiriladi."""
+        if not text:
+            self.status_label.setVisible(False)
+            self.status_label.setText("")
+            return
+
+        palette = {
+            "info":    ("rgba(255,255,255,0.80)", "rgba(255,255,255,0.04)", "rgba(255,255,255,0.08)"),
+            "success": ("#38d9a9",                 "rgba(56,217,169,0.10)", "rgba(56,217,169,0.28)"),
+            "warning": ("#ffc864",                 "rgba(255,200,100,0.10)", "rgba(255,200,100,0.28)"),
+            "error":   ("#ff7c7c",                 "rgba(255,124,124,0.10)", "rgba(255,124,124,0.28)"),
+        }
+        color, bg, brd = palette.get(variant, palette["info"])
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                background: {bg};
+                border: 1px solid {brd};
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-weight: 600;
+            }}
+        """)
+        self.status_label.setVisible(True)
 
     def _create_action_button(self, icon_text, label, hint,
                                icon_bg, icon_border, icon_color,
                                border_color, hover_border, hover_bg):
-        """Create a styled action button matching the HTML design."""
+        """MD3 filled-tonal action card — ixcham, zamonaviy."""
         btn = _ClickableCard()
         btn.setObjectName("actionBtn")
-        btn.setFixedHeight(110)
+        btn.setFixedHeight(76)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""
             QFrame#actionBtn {{
-                background: rgba(255,255,255,0.055);
+                background: rgba(255,255,255,0.045);
                 border: 1px solid {border_color};
-                border-radius: 20px;
+                border-radius: 16px;
             }}
             QFrame#actionBtn:hover {{
                 border-color: {hover_border};
@@ -892,52 +1318,129 @@ class SyncPage(QWidget):
             }}
         """)
 
-        # Internal layout
         layout = QHBoxLayout(btn)
-        layout.setContentsMargins(20, 20, 22, 20)
-        layout.setSpacing(18)
+        layout.setContentsMargins(14, 12, 16, 12)
+        layout.setSpacing(14)
 
-        # Icon wrap
+        # Icon chip — 44x44, MD3 radius 12
         icon_label = QLabel(icon_text)
-        icon_label.setFixedSize(58, 58)
+        icon_label.setFixedSize(44, 44)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet(f"""
             background: {icon_bg};
             border: 1px solid {icon_border};
-            border-radius: 16px;
+            border-radius: 12px;
             color: {icon_color};
-            font-size: 26px;
+            font-size: 20px;
         """)
         layout.addWidget(icon_label)
 
-        # Text wrap
+        # Text block
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(6)
+        text_layout.setSpacing(1)
         text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         label_widget = QLabel(label)
-        label_widget.setFont(QFont("Segoe UI", 16, QFont.Weight.DemiBold))
-        label_widget.setStyleSheet("color: white; background: transparent; border: none; letter-spacing: 0.5px;")
+        label_widget.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
+        label_widget.setStyleSheet("color: #F0F6FA; background: transparent; border: none; letter-spacing: 0.2px;")
         text_layout.addWidget(label_widget)
 
         hint_widget = QLabel(hint)
-        hint_widget.setFont(QFont("Segoe UI", 13))
-        hint_widget.setStyleSheet("color: rgba(255,255,255,0.55); background: transparent; border: none;")
+        hint_widget.setFont(QFont("Segoe UI", 10))
+        hint_widget.setStyleSheet("color: rgba(255,255,255,0.52); background: transparent; border: none;")
         text_layout.addWidget(hint_widget)
 
         layout.addLayout(text_layout, stretch=1)
 
-        # Chevron
+        # Chevron — kichik, ixcham
         chevron = QLabel("\u203A")
-        chevron.setFont(QFont("Segoe UI", 26))
-        chevron.setStyleSheet("color: rgba(255,255,255,0.35); background: transparent; border: none;")
+        chevron.setFixedWidth(16)
+        chevron.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        chevron.setFont(QFont("Segoe UI", 18, QFont.Weight.Medium))
+        chevron.setStyleSheet(f"color: {icon_color}; background: transparent; border: none;")
         layout.addWidget(chevron)
+
+        return btn
+
+    def _create_hero_button(self, icon_text: str, label: str, hint: str) -> QFrame:
+        """Asosiy HERO button — Face Recognition uchun, to'ldirilgan gradient ko'rinishi.
+        Kartochka shaklida emas, aniq CTA primary buttoni kabi."""
+        btn = _ClickableCard()
+        btn.setObjectName("heroBtn")
+        btn.setFixedHeight(84)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QFrame#heroBtn {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #2eb07c,
+                    stop:0.55 #1f9a6a,
+                    stop:1 #14855a);
+                border: 1px solid rgba(86,235,186,0.45);
+                border-radius: 18px;
+            }}
+            QFrame#heroBtn:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #38c48c,
+                    stop:0.55 #25ac78,
+                    stop:1 #179664);
+                border-color: rgba(120,248,201,0.75);
+            }}
+        """)
+
+        layout = QHBoxLayout(btn)
+        layout.setContentsMargins(18, 14, 22, 14)
+        layout.setSpacing(16)
+
+        # Icon chip — bigger, white tinted for hero
+        icon_label = QLabel(icon_text)
+        icon_label.setFixedSize(52, 52)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet("""
+            background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.28);
+            border-radius: 14px;
+            color: #ffffff;
+            font-size: 22px;
+        """)
+        layout.addWidget(icon_label)
+
+        # Text block
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        label_widget = QLabel(label)
+        label_widget.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        label_widget.setStyleSheet("color: #ffffff; background: transparent; border: none; letter-spacing: 0.3px;")
+        text_layout.addWidget(label_widget)
+
+        hint_widget = QLabel(hint)
+        hint_widget.setFont(QFont("Segoe UI", 10))
+        hint_widget.setStyleSheet("color: rgba(255,255,255,0.78); background: transparent; border: none;")
+        text_layout.addWidget(hint_widget)
+
+        layout.addLayout(text_layout, stretch=1)
+
+        # Arrow — white, prominent
+        arrow = QLabel("\u2192")
+        arrow.setFixedWidth(28)
+        arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        arrow.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
+        arrow.setStyleSheet("color: #ffffff; background: transparent; border: none;")
+        layout.addWidget(arrow)
 
         return btn
 
     # ══════════════════════════════════════
     # Signals / Slots
     # ══════════════════════════════════════
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._loading_overlay.isVisible():
+            self._loading_overlay.setGeometry(self.rect())
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -949,10 +1452,7 @@ class SyncPage(QWidget):
         if not self._sessions:
             self._load_sessions()
             if not self._sessions:
-                self.status_label.setText("Aktiv testlar topilmadi")
-                self.status_label.setStyleSheet(
-                    "color: rgba(255,200,100,0.9); background: transparent; border: none;"
-                )
+                self._set_status("Aktiv testlar topilmadi", "warning")
                 return
 
         modal = _ExamModal(self._sessions, self._db, parent=self)
@@ -962,16 +1462,12 @@ class SyncPage(QWidget):
     def _on_delete_clicked(self):
         """Clear local database."""
         self._db.clear_all_data()
-        self.status_label.setText("Ma'lumotlar muvaffaqiyatli tozalandi!")
-        self.status_label.setStyleSheet(
-            "color: #38d9a9; background: transparent; border: none; font-weight: 600;"
-        )
+        self._sessions = []
+        self.data_cleared.emit()
+        self._set_status("Ma'lumotlar muvaffaqiyatli tozalandi!", "success")
 
     def _load_sessions(self):
-        self.status_label.setText("Serverdan ma'lumot olinmoqda...")
-        self.status_label.setStyleSheet(
-            "color: rgba(255,255,255,0.6); background: transparent; border: none;"
-        )
+        self._set_status("Serverdan ma'lumot olinmoqda...", "info")
 
         try:
             raw_sessions = self._api.get_active_sessions()
@@ -1010,19 +1506,13 @@ class SyncPage(QWidget):
         except Exception:
             rows = self._db.get_active_sessions()
             self._sessions = [dict(r) for r in rows]
-            self.status_label.setText("Offline rejim: mahalliy ma'lumotlar yuklandi")
-            self.status_label.setStyleSheet(
-                "color: rgba(255,200,100,0.9); background: transparent; border: none;"
-            )
+            self._set_status("Offline rejim: mahalliy ma'lumotlar yuklandi", "warning")
             return
 
         if self._sessions:
-            self.status_label.setText(f"{len(self._sessions)} ta aktiv test topildi")
-            self.status_label.setStyleSheet(
-                "color: #38d9a9; background: transparent; border: none;"
-            )
+            self._set_status(f"{len(self._sessions)} ta aktiv test topildi", "success")
         else:
-            self.status_label.setText("Aktiv testlar topilmadi")
+            self._set_status("Aktiv testlar topilmadi", "warning")
 
     def _start_download_sessions(self, sessions: list):
         """Download data for selected sessions."""
@@ -1034,47 +1524,41 @@ class SyncPage(QWidget):
         if not session_id:
             return
 
-        self._spinner.start()
+        self._loading_overlay.start("Ma'lumotlar yuklanmoqda...")
         self._download_action_btn.setEnabled(False)
-        self.status_label.setText("Yuklab olinmoqda...")
-        self.status_label.setStyleSheet(
-            "color: rgba(255,255,255,0.7); background: transparent; border: none;"
-        )
 
         self._downloader = DataDownloader(session_id, parent=self)
-        self._downloader.progress.connect(self._on_progress)
         self._downloader.finished_ok.connect(self._on_download_ok)
         self._downloader.error.connect(self._on_download_error)
         self._downloader.start()
 
-    def _start_download(self):
-        """Legacy: direct download for a session (used if modal bypassed)."""
-        if self._sessions:
-            self._start_download_sessions([self._sessions[0]])
-
-    def _on_progress(self, current, total):
-        pass  # Spinner handles visual feedback
-
     def _on_download_ok(self, loaded: int, skipped: int):
+        self._download_action_btn.setEnabled(True)
         if skipped > 0:
-            self.status_label.setText(
-                f"{loaded} ta yuklandi, {skipped} ta yuklanmadi"
+            self._loading_overlay.show_result(
+                _LoadingOverlay.MODE_WARNING,
+                title=f"{loaded} ta yuklandi",
+                subtitle=f"{skipped} ta yuklanmadi (ma'lumot to'liq emas)",
             )
-            self.status_label.setStyleSheet(
-                "color: rgba(255,200,100,0.9); background: transparent; border: none; font-weight: 600;"
+            self._set_status(
+                f"{loaded} ta yuklandi, {skipped} ta yuklanmadi", "warning",
             )
         else:
-            self.status_label.setText(f"{loaded} ta student muvaffaqiyatli yuklandi!")
-            self.status_label.setStyleSheet(
-                "color: #38d9a9; background: transparent; border: none; font-weight: 600;"
+            self._loading_overlay.show_result(
+                _LoadingOverlay.MODE_SUCCESS,
+                title=f"{loaded} ta student yuklandi",
+                subtitle="Ma'lumotlar muvaffaqiyatli saqlandi",
             )
-        self._spinner.stop()
-        self._download_action_btn.setEnabled(True)
+            self._set_status(
+                f"{loaded} ta student muvaffaqiyatli yuklandi!", "success",
+            )
 
     def _on_download_error(self, err):
-        self.status_label.setText(f"Xatolik: {err}")
-        self.status_label.setStyleSheet(
-            "color: #ff7c7c; background: transparent; border: none; font-weight: 600;"
-        )
-        self._spinner.stop()
         self._download_action_btn.setEnabled(True)
+        self._loading_overlay.show_result(
+            _LoadingOverlay.MODE_ERROR,
+            title="Xatolik yuz berdi",
+            subtitle=str(err)[:80],
+            auto_close_ms=3500,
+        )
+        self._set_status(f"Xatolik: {err}", "error")

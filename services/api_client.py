@@ -44,14 +44,50 @@ class ApiClient(metaclass=SingletonMeta):
         resp.raise_for_status()
         return resp.json()
 
-    # ── Entry submission ──
-    def submit_entry(self, entry_data: dict) -> dict:
-        resp = self._client.post("/entries", json=entry_data, headers=self._headers())
+    def get_smena_attendance_stats(self, smena_id: int) -> dict:
+        """Serverdan smena + bino kesimida davomat statistikasini olish.
+
+        Qaytaradi: {total, entered, not_entered, cheating}.
+        """
+        resp = self._client.get(
+            f"/test-sessions/smenas/{smena_id}/attendance-stats",
+            headers=self._headers(),
+            timeout=10.0,
+        )
         resp.raise_for_status()
         return resp.json()
 
-    async def submit_entry_async(self, entry_data: dict) -> dict:
-        resp = await self._async_client.post("/entries", json=entry_data, headers=self._headers())
+    # ── Lookup: reasons ──
+    def get_reason_types(self) -> list[dict]:
+        resp = self._client.get("/lookup/reason-types", headers=self._headers())
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_reasons(self) -> list[dict]:
+        resp = self._client.get("/lookup/reasons", headers=self._headers())
+        resp.raise_for_status()
+        return resp.json()
+
+    # ── Entry submission ──
+    def submit_entry(self, entry_data: dict) -> dict:
+        """Legacy: bitta entry yuborish — bulk endpointga wrap qilingan."""
+        resp = self._client.post(
+            "/students/logs/bulk",
+            json={"items": [entry_data]},
+            headers=self._headers(),
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def submit_entries_bulk_async(self, items: list[dict]) -> dict:
+        """Batch verify-log yuborish. Server har bir item uchun alohida natija qaytaradi."""
+        resp = await self._async_client.post(
+            "/students/logs/bulk",
+            json={"items": items},
+            headers=self._headers(),
+            timeout=60.0,
+        )
         resp.raise_for_status()
         return resp.json()
 

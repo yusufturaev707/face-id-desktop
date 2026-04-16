@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(.venv/Scripts/python.exe -c \"from config import DB_PATH; print\\(DB_PATH\\)\" 2>&1)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(wc -l services/*.py ui/pages/*.py database/*.py)"
     ]
   }
 }

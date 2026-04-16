@@ -18,7 +18,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Face-ID Desktop")
+        self.setWindowTitle("FACE ID DESKTOP")
         self.setMinimumSize(1100, 700)
 
         self._auth = AuthService()
@@ -54,7 +54,7 @@ class MainWindow(QMainWindow):
 
     def _on_model_loaded(self, success: bool, msg: str):
         self._login_page.set_model_status(
-            "AI model tayyor" if success else msg,
+            msg if success else msg,
             is_ready=success,
         )
         self._model_loader = None
@@ -89,6 +89,8 @@ class MainWindow(QMainWindow):
         self._faceid_page.logout_requested.connect(self._on_logout)
         self._faceid_page.go_back.connect(self._on_back_from_faceid)
         self._stack.addWidget(self._faceid_page)
+
+        self._sync_page.data_cleared.connect(self._faceid_page.reset_stats)
 
     def _on_login_success(self, staff: dict):
         self._staff = staff
